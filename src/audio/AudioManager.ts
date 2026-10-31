@@ -1,4 +1,6 @@
 import { Howl, Howler } from 'howler';
+import type { AmbientConfig } from '../core/types';
+import { AmbientBed } from './AmbientBed';
 
 /**
  * All audio goes through here (Howler, Web Audio mode).
@@ -11,9 +13,8 @@ import { Howl, Howler } from 'howler';
  */
 export class AudioManager {
   private sounds = new Map<string, Howl>();
-  private ambient?: Howl;
-  private ambientId?: number;
-  private ambientTarget = 0.3;
+  /** Layered background loops + random one-shots (gapless, on raw Web Audio). */
+  readonly ambient = new AmbientBed();
   private narrationId?: { howl: Howl; id: number };
   private narrationResolve?: () => void;
   unlocked = false;
@@ -137,36 +138,19 @@ export class AudioManager {
     resolve?.();
   }
 
-  /** Start the looping ambient bed with a fade-in. Call inside the unlock gesture for best results. */
-  startAmbient(url: string, volume = 0.3, fadeMs = 2500): void {
-    this.stopAmbient(0);
-    const howl = this.sounds.get(url);
-    if (!howl) return;
-    this.ambient = howl;
-    this.ambientTarget = volume;
-    howl.loop(true);
-    howl.volume(0);
-    const id = howl.play(); // queued by Howler if still decoding
-    this.ambientId = id;
-    howl.fade(0, volume, fadeMs, id);
+  /**
+   * Start a page's soundscape, cross-fading from the previous page's.
+   * Call inside the unlock gesture for the first page; later pages can start any time.
+   */
+  startAmbient(cfg: AmbientConfig, resolve: { loop: (k: string) => string; sprinkle: (k: string) => string }, fadeMs = 2500): void {
+    this.ambient.start(cfg, resolve, fadeMs);
   }
 
   stopAmbient(fadeMs = 1200): void {
-    const howl = this.ambient;
-    const id = this.ambientId;
-    if (!howl || id === undefined) return;
-    this.ambient = undefined;
-    this.ambientId = undefined;
-    if (fadeMs <= 0) return void howl.stop(id);
-    howl.fade(howl.volume(id) as number, 0, fadeMs, id);
-    howl.once('fade', () => howl.stop(id), id);
+    this.ambient.stop(fadeMs);
   }
 
   private duckAmbient(duck: boolean): void {
-    const howl = this.ambient;
-    const id = this.ambientId;
-    if (!howl || id === undefined || !howl.playing(id)) return;
-    const to = duck ? this.ambientTarget * 0.35 : this.ambientTarget;
-    howl.fade(howl.volume(id) as number, to, duck ? 250 : 800, id);
+    this.ambient.duck(duck);
   }
 }

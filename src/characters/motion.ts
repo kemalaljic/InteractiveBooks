@@ -38,6 +38,21 @@ export const IDLE: Record<IdleKind, (t: number, seed: number) => Pose> = {
   },
   sway: (t, s) => ({ dx: 0, dy: 0, sx: 1, sy: 1, rot: Math.sin(t * 1.1 + s) * 0.035 + Math.sin(t * 2.3 + s) * 0.012 }),
   float: (t, s) => ({ dx: 0, dy: Math.sin(t + s) * 4, sx: 1, sy: 1, rot: Math.sin(t * 0.8 + s) * 0.02 }),
+  // duck: slow drift on the water with a gentle rock
+  paddle: (t, s) => ({ dx: Math.sin(t * 0.3 + s) * 45, dy: Math.sin(t * 1.6 + s) * 4, sx: 1, sy: 1, rot: Math.sin(t * 1.6 + s) * 0.04 }),
+  // butterfly: irregular wandering (sum of incommensurate sines)
+  flutter: (t, s) => ({
+    dx: Math.sin(t * 0.5 + s) * 60 + Math.sin(t * 1.7 + s) * 18,
+    dy: Math.sin(t * 0.8 + s) * 30 + Math.sin(t * 3.1) * 10,
+    sx: 1,
+    sy: 1,
+    rot: Math.sin(t * 1.3 + s) * 0.15,
+  }),
+  // moon, fireflies: slow breathing glow
+  glow: (t, s) => {
+    const b = Math.sin(t * 0.9 + s);
+    return { dx: 0, dy: b * 5, sx: 1 + b * 0.025, sy: 1 + b * 0.025, rot: 0 };
+  },
 };
 
 export interface Reaction {
@@ -96,6 +111,33 @@ export const REACTIONS: Record<ReactionKind, Reaction> = {
       const air = smooth(0, 0.92, p);
       const settle = p > 0.92 ? damped((p - 0.92) / 0.08, 2, 1) * 0.2 : 0;
       return { dx: 0, dy: -380 * Math.sin(air * Math.PI), sx: 1 + settle, sy: 1 - settle, rot: -air * TAU };
+    },
+  },
+  dive: {
+    // duck tips bottom-up, then pops back
+    duration: 1.4,
+    landAt: 0.15,
+    pose: (p) => {
+      const down = smooth(0, 0.25, p) * (1 - smooth(0.6, 0.85, p));
+      const pop = p > 0.85 ? damped((p - 0.85) / 0.15, 3, 2) * 0.2 : 0;
+      return { dx: 0, dy: down * 40, sx: 1 + pop, sy: 1 - pop, rot: -down * 1.6 };
+    },
+  },
+  hop: {
+    // small double hop
+    duration: 0.9,
+    pose: (p) => {
+      const h = Math.abs(Math.sin(p * Math.PI * 2)) * (1 - p * 0.4);
+      const squash = (1 - h) * 0.12 * Math.sin(p * Math.PI);
+      return { dx: 0, dy: -70 * h, sx: 1 + squash, sy: 1 - squash + h * 0.08, rot: Math.sin(p * TAU) * 0.12 };
+    },
+  },
+  spin: {
+    // pop + a full turn
+    duration: 1.1,
+    pose: (p) => {
+      const pop = damped(p, 4, 3) * 0.3;
+      return { dx: 0, dy: 0, sx: 1 + pop, sy: 1 + pop, rot: smooth(0, 0.8, p) * TAU };
     },
   },
   sway: {
