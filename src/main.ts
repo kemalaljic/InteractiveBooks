@@ -1,9 +1,11 @@
 import './ui/styles.css';
 import { registerSW } from 'virtual:pwa-register';
 import { AudioManager } from './audio/AudioManager';
-import { resolvePage } from './content';
-import { ambientUrl } from './core/assets';
-import { audioUrlsFor, PageController } from './scene/PageController';
+import { resolveBook } from './content';
+import { ambientResolvers, ambientUrlsFor } from './core/assets';
+import { Book } from './scene/Book';
+import { audioUrlsFor } from './scene/PageController';
+import { Particles } from './scene/Particles';
 import { Stage } from './scene/Stage';
 import { Hud } from './ui/Hud';
 import { showStartScreen } from './ui/StartScreen';
@@ -16,32 +18,40 @@ for (const ev of ['gesturestart', 'gesturechange', 'dblclick']) {
   document.addEventListener(ev, (e) => e.preventDefault(), { passive: false });
 }
 
-const page = resolvePage();
+const { pages, startIndex } = resolveBook();
 const appEl = document.getElementById('app')!;
 const uiEl = document.getElementById('ui')!;
 
 const audio = new AudioManager();
 audio.installLifecycleHandlers();
-// Create + decode all Howls now (before the tap), so the first sounds are instant.
-const audioReady = audio.preload(audioUrlsFor(page));
 
 const stage = new Stage();
-let controller: PageController;
-const hud = new Hud(uiEl, page.objects.length, page.ui, () => controller.again());
+let book: Book;
+const hud = new Hud(uiEl, { onAgain: () => book.controller?.again(), onNext: () => book.next() });
 
 const sceneReady = (async () => {
   await stage.init(appEl);
-  controller = new PageController(stage, audio, hud, page);
-  await controller.build();
+  const particles = new Particles(stage.fx, stage.app.renderer, stage.app.ticker);
+  book = new Book(stage, audio, hud, particles, pages);
+  book.index = startIndex;
+  await book.load(startIndex);
 })();
 
+// Create + decode the first page's audio right away (before the tap), so the first sounds are instant.
+const first = pages[startIndex];
+void audio.ambient.preload(ambientUrlsFor(first));
+const audioReady = audio.preload(audioUrlsFor(first));
+
 // The start screen goes up immediately. It doesn't wait for anything async.
-showStartScreen(uiEl, page.bookTitle, page.ui.start, () => {
+showStartScreen(uiEl, first.bookTitle, first.ui.start, () => {
   // ── Inside the gesture. Keep this block synchronous. ──
   audio.unlock();
-  audio.startAmbient(ambientUrl(page.ambient), page.ambientVolume);
+  audio.startAmbient(first.ambient, ambientResolvers);
   // ── Async from here on is fine. ──
-  void sceneReady.then(() => controller.start(audioReady));
+  void sceneReady.then(() => {
+    book.controller!.start(audioReady);
+    if (startIndex + 1 < pages.length) void audioReady.then(() => book.preloadAudio(startIndex + 1));
+  });
 });
 
 sceneReady.catch((err) => {
@@ -50,4 +60,18 @@ sceneReady.catch((err) => {
 });
 
 // Handy for debugging on the device via Safari Web Inspector.
-Object.assign(window, { __storybook: { audio, stage, page, get controller() { return controller; } } });
+Object.assign(window, {
+  __storybook: {
+    audio,
+    stage,
+    get book() {
+      return book;
+    },
+    get controller() {
+      return book?.controller;
+    },
+    get page() {
+      return book?.page;
+    },
+  },
+});

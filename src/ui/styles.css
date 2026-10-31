@@ -75,8 +75,9 @@ body {
   top: calc(var(--safe-top) + 22px);
   right: 20px;
   display: flex;
-  gap: 4px;
-  font-size: clamp(18px, 2.4vw, 28px);
+  gap: 2px;
+  /* Small enough that 8+ stars never reach the caption box. */
+  font-size: clamp(14px, 1.7vw, 22px);
 }
 .progress span {
   filter: grayscale(1);
@@ -216,4 +217,37 @@ body {
   overflow: hidden;
   opacity: 0.01;
   pointer-events: none;
+}
+
+/* ---------- Reward buttons + page-turn curtain ---------- */
+.reward-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 24px;
+}
+.reward .next {
+  min-height: 100px;
+  font-size: clamp(32px, 5vw, 56px);
+  background: #4fa3ff;
+  box-shadow: 0 10px 0 #2b7bd6, 0 18px 30px rgba(0, 0, 0, 0.25);
+  pointer-events: none;
+}
+.reward.visible .next {
+  pointer-events: auto;
+}
+.reward .next[hidden] {
+  display: none;
+}
+.curtain {
+  position: absolute;
+  inset: 0;
+  background: #fffdf5;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.4s ease;
+}
+.curtain.closed {
+  opacity: 1;
+  pointer-events: auto;
 }

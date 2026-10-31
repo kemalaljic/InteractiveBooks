@@ -10,13 +10,25 @@
 export type Lang = 'hr' | 'bs' | 'en';
 
 /** Placeholder idle loops (used until a Rive file exists for the object). */
-export type IdleKind = 'bob' | 'hover' | 'swim' | 'sway' | 'float';
+export type IdleKind = 'bob' | 'hover' | 'swim' | 'sway' | 'float' | 'paddle' | 'flutter' | 'glow';
 
 /** Placeholder tap reactions. */
-export type ReactionKind = 'jump' | 'wobble' | 'loop' | 'leap' | 'sway' | 'squash';
+export type ReactionKind = 'jump' | 'wobble' | 'loop' | 'leap' | 'sway' | 'squash' | 'dive' | 'hop' | 'spin';
 
 /** Built-in vector placeholder drawings. */
-export type PlaceholderArt = 'frog' | 'lilypad' | 'dragonfly' | 'fish' | 'reed';
+export type PlaceholderArt =
+  | 'frog'
+  | 'lilypad'
+  | 'dragonfly'
+  | 'fish'
+  | 'reed'
+  | 'duck'
+  | 'butterfly'
+  | 'bird'
+  | 'moon'
+  | 'owl'
+  | 'fireflies'
+  | 'cricket';
 
 export type ParticleKind = 'sparkles' | 'bubbles' | 'splash' | 'confetti';
 
@@ -54,11 +66,33 @@ export interface SceneObjectConfig {
   particles?: ParticleKind;
 }
 
+export type PainterId = 'pondSky' | 'pondFarBank' | 'pondWater';
+export type TimeOfDay = 'day' | 'night';
+
 export type BackgroundLayerConfig =
   /** Built-in procedural painter (prototype art). */
-  | { id: LayerId; parallax: number; painter: 'pondSky' | 'pondFarBank' | 'pondWater' }
+  | { id: LayerId; parallax: number; painter: PainterId; variant?: TimeOfDay }
   /** Painted artwork: an image under public/ placed at world (x, y) with the given size. */
   | { id: LayerId; parallax: number; image: string; x: number; y: number; width: number; height: number };
+
+/**
+ * Background soundscape: several seamless loops mixed together, plus short one-shots
+ * (a bird chirp, a distant frog) fired at random moments from random directions.
+ * Everything here is ducked while narration plays.
+ */
+export interface AmbientConfig {
+  /** Loops from public/audio/ambient/<key>.mp3, played together. */
+  loops: Array<{ key: string; volume: number }>;
+  /** One-shots from public/audio/sfx/<key>.mp3. A random key from `keys` every `every` seconds. */
+  sprinkles?: Array<{
+    keys: string[];
+    volume: number;
+    /** Seconds between plays: [min, max]. */
+    every: [number, number];
+    /** Stereo position range -1 (left) .. 1 (right). Default [-0.8, 0.8]. */
+    pan?: [number, number];
+  }>;
+}
 
 export interface PageConfig {
   /** Unique across all books, used as the narration file prefix, e.g. 'mala-zaba-1'. */
@@ -67,12 +101,10 @@ export interface PageConfig {
   lang: Lang;
   /** Back-to-front. */
   layers: BackgroundLayerConfig[];
-  /** File key in public/audio/ambient/<ambient>.mp3 */
-  ambient: string;
-  ambientVolume?: number;
+  ambient: AmbientConfig;
   intro?: { caption: string; narration: string };
   objects: SceneObjectConfig[];
   reward: { caption: string; narration: string; sfx: string };
   /** Text for UI chrome. */
-  ui: { start: string; again: string; bravo: string };
+  ui: { start: string; again: string; bravo: string; next: string };
 }

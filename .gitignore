@@ -1,6 +1,5 @@
 node_modules
 dist
 dev-dist
-raw-audio/*
-!raw-audio/README.md
+raw-audio/_placeholder
 *.zip

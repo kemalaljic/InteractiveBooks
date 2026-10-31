@@ -55,6 +55,13 @@ export class Stage {
     return view;
   }
 
+  /** Remove every page layer (used when turning the page). The fx overlay is kept. */
+  clearLayers(): void {
+    for (const { view } of this.layers.values()) view.destroy({ children: true });
+    this.layers.clear();
+    this.camTargetX = this.camTargetY = 0;
+  }
+
   layer(id: LayerId): Container {
     const l = this.layers.get(id);
     if (!l) throw new Error(`No layer "${id}"`);

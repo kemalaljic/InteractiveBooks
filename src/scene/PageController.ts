@@ -1,12 +1,12 @@
-import { Point, type FederatedPointerEvent } from 'pixi.js';
+import { Point, type FederatedPointerEvent, type Ticker } from 'pixi.js';
 import type { AudioManager } from '../audio/AudioManager';
 import type { Character } from '../characters/Character';
 import { createCharacter } from '../characters/createCharacter';
-import { ambientUrl, narrationKeyFor, narrationUrl, sfxUrl } from '../core/assets';
+import { narrationKeyFor, narrationUrl, sfxUrl } from '../core/assets';
 import type { PageConfig } from '../core/types';
 import type { Hud } from '../ui/Hud';
 import { buildBackground } from './Background';
-import { Particles } from './Particles';
+import type { Particles } from './Particles';
 import { WORLD_W, type Stage } from './Stage';
 
 /** Minimum hit radius in CSS px (= 100px target, comfortably above the 80px rule). */
@@ -16,10 +16,9 @@ const HIT_SLOP_PX = 40;
 const TAP_COOLDOWN_MS = 450;
 const NARRATION_DELAY_MS = 350;
 
-/** Every URL a page needs, so it can be preloaded (and is precached by the service worker anyway). */
+/** Every Howler sound a page needs (narration + SFX). Ambient files are handled by AmbientBed. */
 export function audioUrlsFor(page: PageConfig): string[] {
   return [
-    ambientUrl(page.ambient),
     sfxUrl(page.reward.sfx),
     narrationUrl(page.reward.narration),
     ...(page.intro ? [narrationUrl(page.intro.narration)] : []),
@@ -27,66 +26,90 @@ export function audioUrlsFor(page: PageConfig): string[] {
   ];
 }
 
+/** One page on screen: characters, taps, captions, reward. Fully disposable via destroy(). */
 export class PageController {
-  private characters: Character[] = [];
-  private particles!: Particles;
-  private found = new Set<string>();
+  readonly characters: Character[] = [];
+  readonly found = new Set<string>();
   private lastTap = new Map<string, number>();
   private narrationTimer?: number;
   private rewardShown = false;
   private started = false;
+  private destroyed = false;
   private lastNarration: Promise<void> = Promise.resolve();
+  private updates: Array<(dtMs: number, tSec: number) => void> = [];
+  private timers = new Set<number>();
+  private readonly tick = (t: Ticker) => {
+    const now = performance.now();
+    for (const c of this.characters) c.update(t.deltaMS, now);
+    for (const fn of this.updates) fn(t.deltaMS, now / 1000);
+  };
+  private readonly onPointerDown = (e: FederatedPointerEvent) => {
+    if (!this.started) return;
+    const target = this.pick(e.global);
+    if (target) this.activate(target);
+  };
 
   constructor(
     private readonly stage: Stage,
     private readonly audio: AudioManager,
     private readonly hud: Hud,
+    private readonly particles: Particles,
     readonly page: PageConfig,
   ) {}
 
   async build(): Promise<void> {
-    await buildBackground(this.stage, this.page);
-    this.particles = new Particles(this.stage.fx, this.stage.app.renderer, this.stage.app.ticker);
+    await buildBackground(this.stage, this.page, (fn) => this.updates.push(fn));
+    const chars = await Promise.all(this.page.objects.map((o) => createCharacter(o)));
+    this.characters.push(...chars);
+    for (const c of chars) this.stage.layer(c.config.layer ?? 'water').addChild(c.view);
 
-    this.characters = await Promise.all(this.page.objects.map((o) => createCharacter(o)));
-    for (const c of this.characters) this.stage.layer(c.config.layer ?? 'water').addChild(c.view);
-
-    this.stage.app.ticker.add((t) => {
-      const now = performance.now();
-      for (const c of this.characters) c.update(t.deltaMS, now);
-    });
-
+    this.stage.app.ticker.add(this.tick);
     // One stage-level handler does all hit testing, so we can be forgiving with near-misses.
-    const { stage } = this.stage.app;
-    stage.eventMode = 'static';
-    stage.hitArea = this.stage.app.screen;
-    stage.on('pointerdown', (e) => this.onPointerDown(e));
+    const root = this.stage.app.stage;
+    root.eventMode = 'static';
+    root.hitArea = this.stage.app.screen;
+    root.on('pointerdown', this.onPointerDown);
 
     this.startAmbientBubbles();
   }
 
   /**
-   * Called after the start screen's (synchronous) unlock. Taps work immediately;
-   * only the intro line waits for audio decoding (capped, so it can never hang).
+   * Begin interaction. Taps work immediately; only the intro line waits for audio
+   * decoding (capped, so it can never hang).
    */
   start(audioReady: Promise<void> = Promise.resolve()): void {
     this.started = true;
     const intro = this.page.intro;
     if (!intro) return;
     const cap = new Promise((r) => setTimeout(r, 5000));
-    void Promise.race([audioReady, cap]).then(() => {
-      setTimeout(() => {
+    void Promise.race([audioReady, cap]).then(() =>
+      this.later(() => {
         if (this.found.size > 0) return; // child already exploring; don't talk over them
         this.hud.showCaption(intro.caption);
         this.lastNarration = this.audio.playNarration(narrationUrl(intro.narration));
-      }, 500);
-    });
+      }, 500),
+    );
   }
 
-  private onPointerDown(e: FederatedPointerEvent): void {
-    if (!this.started) return;
-    const target = this.pick(e.global);
-    if (target) this.activate(target);
+  /** "Opet!": reset the page for another round. */
+  again(): void {
+    this.hud.showReward(false);
+    this.found.clear();
+    this.hud.setProgress(0);
+    this.rewardShown = false;
+    this.audio.stopNarration();
+    this.start();
+  }
+
+  destroy(): void {
+    this.destroyed = true;
+    this.started = false;
+    this.timers.forEach(clearTimeout);
+    clearTimeout(this.narrationTimer);
+    this.stage.app.ticker.remove(this.tick);
+    this.stage.app.stage.off('pointerdown', this.onPointerDown);
+    this.characters.forEach((c) => c.destroy());
+    this.stage.clearLayers();
   }
 
   /** Nearest object whose (enlarged) hit circle contains the point, or is within the slop margin. */
@@ -122,7 +145,7 @@ export class PageController {
     const at = this.fxPoint(c, cfg.hit.dx ?? 0, cfg.hit.dy ?? 0);
     if (cfg.particles) this.particles.emit(cfg.particles, at.x, at.y);
     if (c.landAt !== undefined && cfg.particles === 'splash') {
-      setTimeout(() => {
+      this.later(() => {
         const p = this.fxPoint(c, 0, 0);
         this.particles.emit('splash', p.x, p.y);
       }, c.reactionDuration * c.landAt * 1000);
@@ -140,9 +163,9 @@ export class PageController {
     if (!this.rewardShown && this.found.size === this.characters.length) {
       this.rewardShown = true;
       // Let the last line finish (but don't wait forever), then celebrate.
-      setTimeout(() => {
+      this.later(() => {
         const wait = Promise.race([this.lastNarration, new Promise((r) => setTimeout(r, 4000))]);
-        void wait.then(() => this.reward());
+        void wait.then(() => !this.destroyed && this.reward());
       }, NARRATION_DELAY_MS + 50);
     }
   }
@@ -156,22 +179,21 @@ export class PageController {
       [WORLD_W * 0.8, 950, 650],
       [WORLD_W / 2, 950, 1100],
     ];
-    for (const [x, y, delay] of bursts) setTimeout(() => this.particles.emit('confetti', x, y), delay);
-    this.characters.forEach((c, i) => setTimeout(() => c.happy(), 200 + i * 160));
-    setTimeout(() => {
+    for (const [x, y, delay] of bursts) this.later(() => this.particles.emit('confetti', x, y), delay);
+    this.characters.forEach((c, i) => this.later(() => c.happy(), 200 + i * 160));
+    this.later(() => {
       this.hud.showCaption(this.page.reward.caption, 8000);
       void this.audio.playNarration(narrationUrl(this.page.reward.narration));
     }, 1300);
   }
 
-  /** "Opet!": reset the page for another round. */
-  again(): void {
-    this.hud.showReward(false);
-    this.found.clear();
-    this.hud.setProgress(0);
-    this.rewardShown = false;
-    this.audio.stopNarration();
-    this.start();
+  /** setTimeout that is cancelled automatically when the page is destroyed. */
+  private later(fn: () => void, ms: number): void {
+    const id = window.setTimeout(() => {
+      this.timers.delete(id);
+      if (!this.destroyed) fn();
+    }, ms);
+    this.timers.add(id);
   }
 
   private fxPoint(c: Character, dx: number, dy: number): Point {
@@ -179,14 +201,13 @@ export class PageController {
   }
 
   private startAmbientBubbles(): void {
+    const fish = this.characters.find((c) => c.config.art.placeholder === 'fish');
+    if (!fish) return;
     const tick = () => {
-      const fish = this.characters.find((c) => c.config.art.placeholder === 'fish');
-      if (fish) {
-        const p = this.fxPoint(fish, 60, -30);
-        this.particles.emit('bubbles', p.x, p.y, 3);
-      }
-      setTimeout(tick, 2500 + Math.random() * 2500);
+      const p = this.fxPoint(fish, 60, -30);
+      this.particles.emit('bubbles', p.x, p.y, 3);
+      this.later(tick, 2500 + Math.random() * 2500);
     };
-    setTimeout(tick, 1500);
+    this.later(tick, 1500);
   }
 }
