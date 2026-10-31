@@ -1,0 +1,6 @@
+node_modules
+dist
+dev-dist
+raw-audio/*
+!raw-audio/README.md
+*.zip

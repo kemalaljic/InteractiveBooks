@@ -1,0 +1,25 @@
+{
+  "name": "storybook-apps",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "audio:placeholders": "bash scripts/make-placeholder-audio.sh",
+    "audio:normalize": "bash scripts/normalize-audio.sh"
+  },
+  "dependencies": {
+    "@rive-app/canvas": "^2.49.0",
+    "howler": "^2.2.4",
+    "pixi.js": "^8.22.0"
+  },
+  "devDependencies": {
+    "@types/howler": "^2.2.13",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.5",
+    "vite-plugin-pwa": "^2.0.0"
+  }
+}
